@@ -53,7 +53,7 @@ class SerLCD : public Print {
 public:
 	SerLCD();
 	~SerLCD();
-	void begin(I2C &wirePort);
+	bool begin(I2C &wirePort);
 	void begin(I2C &wirePort, byte i2c_addr);
 	void begin(Stream &serial);
 	void begin(SPIClass &spiPort, byte csPin);
@@ -62,41 +62,41 @@ public:
     //pass SPISettings by value to allow settings object creation in fucntion call like examples
     void begin(SPIClass &spiPort, byte csPin, SPISettings spiSettings);
 #endif
-	void clear();
-	void home();
-	void setCursor(byte col, byte row);
-	void createChar(byte location, byte charmap[]);
-	void writeChar(byte location);
+	bool clear();
+	bool home();
+	bool setCursor(byte col, byte row);
+	bool createChar(byte location, byte charmap[]);
+  bool writeChar(byte location);
 	virtual size_t write(uint8_t);
 	virtual size_t write(const uint8_t *buffer, size_t size);
     virtual size_t write(const char *str);
-	void noDisplay();
-	void display();
-	void noCursor();
-	void cursor();
-	void noBlink();
-	void blink();
-	void scrollDisplayLeft();
-	void scrollDisplayRight();
-	void scrollDisplayLeft(byte count);
-	void scrollDisplayRight(byte count);
-	void moveCursorLeft();
-	void moveCursorRight();
-	void moveCursorLeft(byte count);
-	void moveCursorRight(byte count);
-	void setBacklight(unsigned long rgb);
-	void setBacklight(byte r, byte g, byte b);
-	void setFastBacklight(unsigned long rgb);
-	void setFastBacklight(byte r, byte g, byte b);
-	void leftToRight();
-	void rightToLeft();
-	void autoscroll();
-	void noAutoscroll();
-	void setContrast(byte new_val);
-	void setAddress(byte new_addr);
-	void command(byte command);
-	void specialCommand(byte command);
-    void specialCommand(byte command, byte count);
+	bool noDisplay();
+  bool display();
+  bool noCursor();
+  bool cursor();
+  bool noBlink();
+  bool blink();
+  bool scrollDisplayLeft();
+  bool scrollDisplayRight();
+  bool scrollDisplayLeft(byte count);
+  bool scrollDisplayRight(byte count);
+  bool moveCursorLeft();
+  bool moveCursorRight();
+  bool moveCursorLeft(byte count);
+  bool moveCursorRight(byte count);
+  bool setBacklight(unsigned long rgb);
+  bool setBacklight(byte r, byte g, byte b);
+  bool setFastBacklight(unsigned long rgb);
+  bool setFastBacklight(byte r, byte g, byte b);
+  bool leftToRight();
+  bool rightToLeft();
+  bool autoscroll();
+  bool noAutoscroll();
+  bool setContrast(byte new_val);
+  bool setAddress(byte new_addr);
+	bool command(byte command);
+	bool specialCommand(byte command);
+    bool specialCommand(byte command, byte count);
 private:
     I2C *_i2cPort = NULL; //The generic connection to user's chosen I2C hardware
     Stream   *_serialPort = NULL; //The generic connection to user's chosen serial hardware
@@ -111,10 +111,10 @@ private:
 	byte _i2cAddr = DISPLAY_ADDRESS1;
 	byte _displayControl = LCD_DISPLAYON | LCD_CURSOROFF | LCD_BLINKOFF;
     byte _displayMode    = LCD_ENTRYLEFT | LCD_ENTRYSHIFTDECREMENT;
-    void init();
-    void beginTransmission();
-    void transmit(byte data);
-    void endTransmission();
+    bool init();
+    bool beginTransmission();
+    bool transmit(byte data);
+    bool endTransmission();
 };
 
 #endif

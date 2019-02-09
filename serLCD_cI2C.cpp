@@ -1,7 +1,23 @@
 /*
- * LCD library for SparkFun RGB 3.3v Serial Open LCD display
- * with an attached Qwiic adapter.
+ * A derivative of the Sparkfun library to control an LCD screen. This library uses a custom I2C library instead
+ * of the native Wire library included in Arduino distributions. Due to the ability of the custom I2C library
+ * to generate error/status codes, the functions involving I2C comm have also been modified to include error
+ * reporting by returning true/false depending on the status of the communication.
  *
+ * Quick usage notes:
+ * 1) Set the position of the cursor on the screen using setCursor().
+ * 2) Print out character(s) starting from the cursor position using print(). This function is inherited from
+ *    the Print class in the core AVR library (C:\Program Files (x86)\Arduino\hardware\arduino\avr\cores\arduino).
+ *    The characters will be printed out to the right of the cursor position.
+ * 3) At any time, the entire screen can be cleared using clear().
+ *
+ * Updating via cursor position allows focused updates on only certain parts of the screen, instead of clearing the
+ * entire screen before each update.
+ *
+ * Modified by Soon Kiat Lau, 2019.
+ *
+ * Original file heading begins below
+ *****************************************************************************************************************
  * By: Gaston R. Williams
  * Date: August 22, 2018
  *
@@ -103,7 +119,7 @@ void SerLCD::begin(I2C &wirePort, byte i2c_addr) {
 /*
  * Set up the i2c communication with the SerLCD.
  */
-void SerLCD::begin(I2C &wirePort) {
+bool SerLCD::begin(I2C &wirePort) {
   _i2cPort = &wirePort; //Grab which port the user wants us to use
   _serialPort = NULL; //Set to null to be safe
   _spiPort = NULL;    //Set to null to be safe
@@ -111,7 +127,7 @@ void SerLCD::begin(I2C &wirePort) {
   //User must initialize I2C before this function is called.
 
   //Call init function since display may have been left in unknown state
-  init();
+  return init();
 } // begin
 
 /*
@@ -150,7 +166,7 @@ void SerLCD::begin(SPIClass &spiPort, byte csPin) {
   _csPin = csPin;
 
   pinMode(csPin, OUTPUT);  //set pin to output, in case user forgot
-  digitalWrite(csPin, HIGH); //deselect dispaly, in case user forgot
+  digitalWrite(csPin, HIGH); //deselect display, in case user forgot
 
   _spiPort = &spiPort; //Grab the port the user wants us to use
   _i2cPort = NULL; //Set to null to be safe
@@ -166,10 +182,11 @@ void SerLCD::begin(SPIClass &spiPort, byte csPin) {
 /*
  * Begin transmission to the device
  */
-void SerLCD::beginTransmission() {
+bool SerLCD::beginTransmission() {
 	//do nothing if using serialPort
 	if (_i2cPort) {
-		_i2cPort->beginTransmission(_i2cAddr); // transmit to device
+    if (_i2cPort->beginTransmission(_i2cAddr, true, false) == I2C_STATUS_OK) { return true; }
+    else { return false; }
 	} else if (_spiPort) {
 #ifdef SPI_HAS_TRANSACTION
         if (_spiTransaction) {
@@ -178,6 +195,7 @@ void SerLCD::beginTransmission() {
 #endif
 		digitalWrite(_csPin, LOW);
 		delay(10); //wait a bit for display to enable
+    return true;
 	}  // if-else
 } //beginTransmission
 
@@ -186,23 +204,27 @@ void SerLCD::beginTransmission() {
  *
  * data - byte to send
  */
- void SerLCD::transmit(uint8_t data) {
+bool SerLCD::transmit(byte data) {
    if (_i2cPort) {
-   		_i2cPort->write(data); // transmit to device
+   		if (_i2cPort->transmit(data) == I2C_STATUS_OK) { return true; }
+      else { return false; }
    	} else if (_serialPort){
    		_serialPort->write(data);
+      return true;
    	} else if (_spiPort) {
    	   _spiPort->transfer(data);
+       return true;
 	}  // if-else
  } //transmit
 
 /*
  * Begin transmission to the device
  */
-void SerLCD::endTransmission() {
+bool SerLCD::endTransmission() {
 	//do nothing if using Serial port
 	if (_i2cPort) {
-		_i2cPort->endTransmission(); // transmit to device
+		if (_i2cPort->endTransmission() == I2C_STATUS_OK) { return true; }
+    else { return false; }
 	} else if (_spiPort) {
 		digitalWrite(_csPin, HIGH);  //disable display
 #ifdef SPI_HAS_TRANSACTION
@@ -211,6 +233,7 @@ void SerLCD::endTransmission() {
 		} //if _spiSettings
 #endif
 		delay(10); //wait a bit for display to disable
+    return true;
 	}  // if-else
 } //beginTransmission
 
@@ -218,16 +241,20 @@ void SerLCD::endTransmission() {
  * Initialize the display
  *
  */
-void SerLCD::init() {
-  beginTransmission();
-  transmit(SPECIAL_COMMAND); //Send special command character
-  transmit(LCD_DISPLAYCONTROL | _displayControl); //Send the display command
-  transmit(SPECIAL_COMMAND); //Send special command character
-  transmit(LCD_ENTRYMODESET | _displayMode); //Send the entry mode command
-  transmit(SETTING_COMMAND); //Put LCD into setting mode
-  transmit(CLEAR_COMMAND); //Send clear display command
-  endTransmission(); //Stop transmission
-   delay(50); //let things settle a bit
+bool SerLCD::init() {
+  if (beginTransmission() &&
+    transmit(SPECIAL_COMMAND) &&                      //Send special command character
+    transmit(LCD_DISPLAYCONTROL | _displayControl) && //Send the display command
+    transmit(SPECIAL_COMMAND) &&                      //Send special command character
+    transmit(LCD_ENTRYMODESET | _displayMode) &&      //Send the entry mode command
+    transmit(SETTING_COMMAND) &&                      //Put LCD into setting mode
+    transmit(CLEAR_COMMAND) &&                        //Send clear display command
+    endTransmission())                                //Stop transmission
+  {
+    delay(50); //let things settle a bitreturn true;
+    return true;
+  }
+  else { return false; }
  } //init
 
  /*
@@ -236,13 +263,16 @@ void SerLCD::init() {
   *
   * byte command to send
   */
- void SerLCD::command(byte command) {
-   beginTransmission(); // transmit to device
-   transmit(SETTING_COMMAND); //Put LCD into setting mode
-   transmit(command); //Send the command code
-   endTransmission(); //Stop transmission
-
-   delay(10); //Hang out for a bit
+ bool SerLCD::command(byte command) {
+   if (beginTransmission() &&     // transmit to device
+     transmit(SETTING_COMMAND) && //Put LCD into setting mode
+     transmit(command) &&         //Send the command code
+     endTransmission())           //Stop transmission
+   {
+     delay(10); //Hang out for a bit
+     return true;
+   }
+   else { return false; }
 }
 
 /*
@@ -250,13 +280,16 @@ void SerLCD::init() {
  *
  * byte command to send
  */
-void SerLCD::specialCommand(byte command) {
-  beginTransmission(); // transmit to device
-  transmit(SPECIAL_COMMAND); //Send special command character
-  transmit(command); //Send the command code
-  endTransmission(); //Stop transmission
-
-  delay(50); //Wait a bit longer for special display commands
+bool SerLCD::specialCommand(byte command) {
+  if (beginTransmission() &&      // transmit to device
+    transmit(SPECIAL_COMMAND) &&  //Send special command character
+    transmit(command) &&          //Send the command code
+    endTransmission())            //Stop transmission
+  {
+    delay(50); //Wait a bit longer for special display commands
+    return true;
+  }
+  else { return false; }
 }
 
 /*
@@ -266,16 +299,25 @@ void SerLCD::specialCommand(byte command) {
  * byte command to send
  * byte count number of times to send
  */
-void SerLCD::specialCommand(byte command, byte count) {
-  beginTransmission(); // transmit to device
-
-  for (int i = 0; i < count; i++) {
-    transmit(SPECIAL_COMMAND); //Send special command character
-    transmit(command); //Send command code
-  } // for
-  endTransmission(); //Stop transmission
-
-  delay(50); //Wait a bit longer for special display commands
+bool SerLCD::specialCommand(byte command, byte count) {
+  if (beginTransmission()) // transmit to device
+  {
+    for (int i = 0; i < count; i++) {
+      if (!transmit(SPECIAL_COMMAND) || //Send special command character
+          !transmit(command))           //Send command code
+      {
+        return false;
+      }
+    } // for
+    
+    if (endTransmission()) //Stop transmission
+    {
+      delay(50); //Wait a bit longer for special display commands
+      return true;
+    }
+    else { return false; }
+  }
+  else { return false; }
 }
 
 /*
@@ -283,9 +325,13 @@ void SerLCD::specialCommand(byte command, byte count) {
  * display and forces the cursor to return to the beginning
  * of the display.
  */
-void SerLCD::clear() {
-  command(CLEAR_COMMAND);
-  delay(10);  // a little extra delay after clear
+bool SerLCD::clear() {
+  if (command(CLEAR_COMMAND))
+  {
+    delay(10);  // a little extra delay after clear
+    return true;
+  }
+  else { return false; }
 }
 
 /*
@@ -293,8 +339,8 @@ void SerLCD::clear() {
  * to return to the beginning of the display, without clearing
  * the display.
  */
-void SerLCD::home() {
- specialCommand(LCD_RETURNHOME);
+bool SerLCD::home() {
+  return specialCommand(LCD_RETURNHOME);
 }
 
 /*
@@ -305,7 +351,7 @@ void SerLCD::home() {
  *
  * returns: boolean true if cursor set.
  */
-void SerLCD::setCursor(byte col, byte row) {
+bool SerLCD::setCursor(byte col, byte row) {
   int row_offsets[] = { 0x00, 0x40, 0x14, 0x54 };
 
   //kepp variables in bounds
@@ -313,7 +359,7 @@ void SerLCD::setCursor(byte col, byte row) {
   row = min(row, MAX_ROWS-1); //row cannot be greater than max rows
 
   //send the command
-  specialCommand(LCD_SETDDRAMADDR | (col + row_offsets[row]));
+  return specialCommand(LCD_SETDDRAMADDR | (col + row_offsets[row]));
 } // setCursor
 
 /*
@@ -321,17 +367,30 @@ void SerLCD::setCursor(byte col, byte row) {
  * byte   location - character number 0 to 7
  * byte[] charmap  - byte array for character
  */
-void SerLCD::createChar(byte location, byte charmap[]) {
+bool SerLCD::createChar(byte location, byte charmap[]) {
   location &= 0x7; // we only have 8 locations 0-7
-  beginTransmission();
-  //Send request to create a customer character
-  transmit(SETTING_COMMAND); //Put LCD into setting mode
-  transmit(27 + location);
-  for (int i = 0; i < 8; i++) {
-    transmit(charmap[i]);
-  } // for
-  endTransmission();
-  delay(50);  //This takes a bit longer
+  
+  if (beginTransmission())
+  {
+    //Send request to create a customer character
+    if (transmit(SETTING_COMMAND) && //Put LCD into setting mode
+        transmit(27 + location))
+    {
+      for (int i = 0; i < 8; i++) {
+        if (!transmit(charmap[i]))
+        { return false; }
+      } // for
+
+      if (endTransmission())
+      {
+        delay(50);  //This takes a bit longer
+        return true;
+      }
+      else { return false; }
+    }
+    else { return false; }
+  }
+  else { return false; }
 }
 
 /*
@@ -339,10 +398,10 @@ void SerLCD::createChar(byte location, byte charmap[]) {
  *
  * byte location - character number 0 to 7
  */
-void SerLCD::writeChar(byte location) {
+bool SerLCD::writeChar(byte location) {
   location &= 0x7; // we only have 8 locations 0-7
 
-  command(35 + location);
+  return command(35 + location);
 }
 
 /*
@@ -384,57 +443,57 @@ size_t SerLCD::write(const uint8_t *buffer, size_t size) {
  /*
   * Turn the display off quickly.
   */
- void SerLCD::noDisplay(){
+ bool SerLCD::noDisplay(){
   _displayControl &= ~LCD_DISPLAYON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // noDisplay
 
 /*
  * Turn the display on quickly.
  */
-void SerLCD::display() {
+ bool SerLCD::display() {
   _displayControl |= LCD_DISPLAYON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // display
  
  /*
   * Turn the underline cursor off.
   */
- void SerLCD::noCursor(){
+ bool SerLCD::noCursor(){
   _displayControl &= ~LCD_CURSORON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // noCursor
 
 /*
  * Turn the underline cursor on.
  */
-void SerLCD::cursor() {
+ bool SerLCD::cursor() {
   _displayControl |= LCD_CURSORON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // cursor
 
  /*
   * Turn the blink cursor off.
   */
- void SerLCD::noBlink(){
+ bool SerLCD::noBlink(){
   _displayControl &= ~LCD_BLINKON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // noBlink
 
 /*
  * Turn the blink cursor on.
  */
-void SerLCD::blink() {
+ bool SerLCD::blink() {
   _displayControl |= LCD_BLINKON;
-  specialCommand(LCD_DISPLAYCONTROL | _displayControl);
+  return specialCommand(LCD_DISPLAYCONTROL | _displayControl);
  } // blink
 
 /*
  * Scroll the display one character to the left, without
  * changing the text
  */
-void SerLCD::scrollDisplayLeft() {
-  specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVELEFT);
+ bool SerLCD::scrollDisplayLeft() {
+   return specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVELEFT);
  } // scrollDisplayLeft
 
 /*
@@ -443,16 +502,16 @@ void SerLCD::scrollDisplayLeft() {
  *
  * count byte - number of characters to scroll
  */
-void SerLCD::scrollDisplayLeft(byte count) {
-  specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVELEFT, count);
+ bool SerLCD::scrollDisplayLeft(byte count) {
+   return specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVELEFT, count);
  } // scrollDisplayLeft
 
 /*
  * Scroll the display one character to the right, without
  * changing the text
  */
-void SerLCD::scrollDisplayRight() {
-  specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVERIGHT);
+ bool SerLCD::scrollDisplayRight() {
+  return specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVERIGHT);
  } // scrollDisplayRight
 
 /*
@@ -461,15 +520,15 @@ void SerLCD::scrollDisplayRight() {
  *
  * count byte - number of characters to scroll
  */
-void SerLCD::scrollDisplayRight(byte count) {
-  specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVERIGHT, count);
+ bool SerLCD::scrollDisplayRight(byte count) {
+  return specialCommand(LCD_CURSORSHIFT | LCD_DISPLAYMOVE | LCD_MOVERIGHT, count);
  } // scrollDisplayRight
 
 /*
  *  Move the cursor one character to the left.
  */
-void SerLCD::moveCursorLeft() {
-  specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVELEFT);
+ bool SerLCD::moveCursorLeft() {
+  return specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVELEFT);
 } // moveCursorLeft
 
 /*
@@ -477,15 +536,15 @@ void SerLCD::moveCursorLeft() {
  *
  *  count byte - number of characters to move
  */
-void SerLCD::moveCursorLeft(byte count) {
-  specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVELEFT, count);
+ bool SerLCD::moveCursorLeft(byte count) {
+  return specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVELEFT, count);
 } // moveCursorLeft
 
 /*
  *  Move the cursor one character to the right.
  */
-void SerLCD::moveCursorRight() {
-  specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVERIGHT);
+ bool SerLCD::moveCursorRight() {
+   return specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVERIGHT);
 } // moveCursorRight
 
 /*
@@ -493,8 +552,8 @@ void SerLCD::moveCursorRight() {
  *
  *  count byte - number of characters to move
  */
-void SerLCD::moveCursorRight(byte count) {
-  specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVERIGHT, count);
+ bool SerLCD::moveCursorRight(byte count) {
+   return specialCommand(LCD_CURSORSHIFT | LCD_CURSORMOVE | LCD_MOVERIGHT, count);
 } // moveCursorRight
 
 /*
@@ -507,105 +566,117 @@ void SerLCD::moveCursorRight(byte count) {
  *
  * rgb - unsigned long hex encoded rgb value.
  */
-void SerLCD::setBacklight(unsigned long rgb) {
+ bool SerLCD::setBacklight(unsigned long rgb) {
   // convert from hex triplet to byte values
   byte r = (rgb >> 16) & 0x0000FF;
   byte g = (rgb >> 8) & 0x0000FF;
   byte b = rgb & 0x0000FF;
 
- setBacklight(r, g, b);
+  return setBacklight(r, g, b);
 }
 
 /*
  * Uses a standard rgb byte triplit eg. (255, 0, 255) to
  * set the backlight color.
  */
-void SerLCD::setBacklight(byte r, byte g, byte b) {
+ bool SerLCD::setBacklight(byte r, byte g, byte b) {
   // map the byte value range to backlight command range
   byte red   = 128 + map(r, 0, 255, 0, 29);
   byte green = 158 + map(g, 0, 255, 0, 29);
   byte blue  = 188 + map(b, 0, 255, 0, 29);
 
   //send commands to the display to set backlights
-  beginTransmission(); // transmit to device
+  if (beginTransmission()) // transmit to device
+  {
+    //Turn display off to hide confirmation messages
+    _displayControl &= ~LCD_DISPLAYON;
+    if (transmit(SPECIAL_COMMAND) &&  //Send special command character
+        transmit(LCD_DISPLAYCONTROL | _displayControl) &&
 
-  //Turn display off to hide confirmation messages
-  _displayControl &= ~LCD_DISPLAYON;
-  transmit(SPECIAL_COMMAND); //Send special command character
-  transmit(LCD_DISPLAYCONTROL | _displayControl);
-
-  //Set the red, green and blue values
-  transmit(SETTING_COMMAND); //Set red backlight amount
-  transmit(red);
-  transmit(SETTING_COMMAND); //Set green backlight amount
-  transmit(green);
-  transmit(SETTING_COMMAND); //Set blue backlight amount
-  transmit(blue);
-
-  //Turn display back on and end
-  _displayControl |= LCD_DISPLAYON;
-  transmit(SPECIAL_COMMAND); //Send special command character
-  transmit(LCD_DISPLAYCONTROL | _displayControl); //Turn display on as before
-  endTransmission(); //Stop transmission
-  delay(50); //This one is a bit slow
+        //Set the red, green and blue values
+        transmit(SETTING_COMMAND) && //Set red backlight amount
+        transmit(red) &&
+        transmit(SETTING_COMMAND) && //Set green backlight amount
+        transmit(green) &&
+        transmit(SETTING_COMMAND) && //Set blue backlight amount
+        transmit(blue))
+    {
+      //Turn display back on and end
+      _displayControl |= LCD_DISPLAYON;
+      if (transmit(SPECIAL_COMMAND) &&  //Send special command character
+          transmit(LCD_DISPLAYCONTROL | _displayControl) && //Turn display on as before
+          endTransmission())            //Stop transmission
+      {
+        delay(50); //This one is a bit slow
+        return true;
+      }
+      else { return false; }
+    }
+    else { return false; }
+  }
+  else { return false; }
 } // setBacklight
 
 // New backlight function
-void SerLCD::setFastBacklight(unsigned long rgb) {
+bool SerLCD::setFastBacklight(unsigned long rgb) {
   // convert from hex triplet to byte values
   byte r = (rgb >> 16) & 0x0000FF;
   byte g = (rgb >> 8) & 0x0000FF;
   byte b = rgb & 0x0000FF;
 
- setFastBacklight(r, g, b);
+  return setFastBacklight(r, g, b);
 }
 
 //New command - set backlight with LCD messages or delays
-void SerLCD::setFastBacklight(byte r, byte g, byte b) {
+bool SerLCD::setFastBacklight(byte r, byte g, byte b) {
 
   //send commands to the display to set backlights
-  beginTransmission(); // transmit to device
-  transmit(SETTING_COMMAND); //Send special command character
-  transmit(SET_RGB_COMMAND); //Send the set RGB character '+' or plus
-  transmit(r); //Send the red value
-  transmit(g); //Send the green value
-  transmit(b); //Send the blue value
-  endTransmission(); //Stop transmission
-  delay(10);
+  if (beginTransmission() && // transmit to device
+      transmit(SETTING_COMMAND) && //Send special command character
+      transmit(SET_RGB_COMMAND) && //Send the set RGB character '+' or plus
+      transmit(r) && //Send the red value
+      transmit(g) && //Send the green value
+      transmit(b) && //Send the blue value
+      endTransmission()) //Stop transmission
+  {
+    delay(10);
+    return true;
+  }
+  else { return false; }
  } // setFastBacklight
 
 /*
  * Set the text to flow from left to right.  This is the direction
  * that is common to most Western languages.
  */
-void SerLCD::leftToRight() {
+bool SerLCD::leftToRight() {
   _displayMode |= LCD_ENTRYLEFT;
-  specialCommand(LCD_ENTRYMODESET | _displayMode);
+  return specialCommand(LCD_ENTRYMODESET | _displayMode);
 } // leftToRight
 
 /*
  * Set the text to flow from right to left.
  */
-void SerLCD::rightToLeft() {
+bool SerLCD::rightToLeft() {
   _displayMode &= ~LCD_ENTRYLEFT;
-  specialCommand(LCD_ENTRYMODESET | _displayMode);
+  return specialCommand(LCD_ENTRYMODESET | _displayMode);
 } //rightToLeft
 
 /*
  * Turn autoscrolling on. This will 'right justify' text from
  * the cursor.
  */
-void SerLCD::autoscroll() {
+bool SerLCD::autoscroll() {
   _displayMode |= LCD_ENTRYSHIFTINCREMENT;
-  specialCommand(LCD_ENTRYMODESET | _displayMode);
+  return specialCommand(LCD_ENTRYMODESET | _displayMode);
 } //autoscroll
 
 /*
  * Turn autoscrolling off.
  */
-void SerLCD::noAutoscroll() {
+bool SerLCD::noAutoscroll() {
   _displayMode &= ~LCD_ENTRYSHIFTINCREMENT;
-  specialCommand(LCD_ENTRYMODESET | _displayMode);
+  return specialCommand(LCD_ENTRYMODESET | _displayMode);
 } //noAutoscroll
 
 /*
@@ -613,15 +684,18 @@ void SerLCD::noAutoscroll() {
  *
  * byte new_val - new contrast value
  */
-void SerLCD::setContrast(byte new_val) {
+bool SerLCD::setContrast(byte new_val) {
   //send commands to the display to set backlights
-  beginTransmission(); // transmit to device
-  transmit(SETTING_COMMAND); //Send contrast command
-  transmit(CONTRAST_COMMAND); //0x18
-  transmit(new_val); //Send new contrast value
-  endTransmission(); //Stop transmission
-
-  delay(10); //Wait a little bit
+  if (beginTransmission() &&        // transmit to device
+      transmit(SETTING_COMMAND) &&  //Send contrast command
+      transmit(CONTRAST_COMMAND) && //0x18
+      transmit(new_val) &&          //Send new contrast value
+      endTransmission())            //Stop transmission
+  {
+    delay(10); //Wait a little bit
+    return true;
+  }
+  else { return false; }
 } //setContrast
 
 /*
@@ -632,16 +706,19 @@ void SerLCD::setContrast(byte new_val) {
  *
  * byte new_addr - new i2c address
  */
-void SerLCD::setAddress(byte new_addr) {
+bool SerLCD::setAddress(byte new_addr) {
   //send commands to the display to set backlights
-  beginTransmission(); // transmit to device on old address
-  transmit(SETTING_COMMAND); //Send contrast command
-  transmit(ADDRESS_COMMAND);  //0x19
-  transmit(new_addr); //Send new contrast value
-  endTransmission(); //Stop transmission
+  if (beginTransmission() &&        // transmit to device on old address
+      transmit(SETTING_COMMAND) &&  //Send contrast command
+      transmit(ADDRESS_COMMAND) &&  //0x19
+      transmit(new_addr) &&         //Send new contrast value
+      endTransmission())            //Stop transmission
+  {
+    //Update our own address so we can still talk to the display
+    _i2cAddr = new_addr;
 
-  //Update our own address so we can still talk to the display
-  _i2cAddr = new_addr;
-
-  delay(50); //This may take awhile
+    delay(50); //This may take awhile
+    return true;
+  }
+  else { return false; }
 } //setContrast
